@@ -5,6 +5,7 @@ package polaris
 
 import (
 	// "database/sql"
+	// _ "github.com/mattn/go-adodb"
 	"fmt"
 	"github.com/Unknwon/goconfig"
 	"github.com/boj/redistore"
@@ -12,12 +13,12 @@ import (
 	"github.com/martini-contrib/render"
 	"github.com/martini-contrib/sessionauth"
 	"github.com/martini-contrib/sessions"
-	_ "github.com/mattn/go-adodb"
 	"github.com/robinmin/gorp"
 	log "github.com/robinmin/logo"
 	stdlog "log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -124,8 +125,8 @@ func NewAppWithConfig(strConfig string) *PolarisApplication {
 			"RedirectUrl":   cfg.MustValue("system", "RedirectUrl", "/new-login"),
 			"RedirectParam": cfg.MustValue("system", "RedirectParam", "new-next"),
 		},
+		Port: cfg.MustInt("system", "port", 3000),
 	}
-
 	// create the app server
 	app := NewApp(cfgItem)
 	app.CfgFile = cfg
@@ -242,10 +243,15 @@ func (app *PolarisApplication) UnInit() bool {
 }
 
 func (app *PolarisApplication) RunApp() bool {
-	// log.Debug("Running application......")
-	app.Run()
-	return true
-
+	host := os.Getenv("HOST")
+	port := app.Config.Port
+	log.Info("listening on " + host + ":" + strconv.Itoa(port))
+	lgr := log.GetLogger("stdout")
+	if lgr != nil {
+		lgr.Fatalln(http.ListenAndServe(host+":"+strconv.Itoa(port), app))
+		return true
+	}
+	return false
 }
 
 // Logger returns a middleware handler that logs the request as it goes in and the response as it goes out.

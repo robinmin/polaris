@@ -28,6 +28,8 @@ type PolarisConfig struct {
 	Database *DBConfig
 	// URL is a URL collection
 	url map[string]string
+	// Port is the port number current server listening on
+	Port int
 }
 
 // RedisConfig is the struct to define configuration items for redis
