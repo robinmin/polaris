@@ -185,6 +185,9 @@ func (app *PolarisApplication) RunApp() bool {
 	config := app.Config.GetBasicConfig()
 
 	host := os.Getenv("HOST")
+	// if len(host) <= 0 {
+	// 	host = os.Getenv("COMPUTERNAME")
+	// }
 	port := config.Port
 	log.Info("listening on " + host + ":" + strconv.Itoa(port))
 	lgr := log.GetLogger("stdout")
