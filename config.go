@@ -101,7 +101,8 @@ func (cfg *PolarisConfig) LoadConfig() bool {
 	}
 
 	cfg.Database = &DBConfig{
-		Driver:   cfgFile.MustValue("database", "db_type", "mssql"),
+		Type:     cfgFile.MustValue("database", "db_type", "mssql"),
+		Driver:   "",
 		Host:     cfgFile.MustValue("database", "db_server", "localhost"),
 		Port:     cfgFile.MustValue("database", "db_port", "1433"),
 		Database: cfgFile.MustValue("database", "db_database", "temdb"),

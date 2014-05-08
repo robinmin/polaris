@@ -12,6 +12,8 @@ import (
 )
 
 type DBConfig struct {
+	// Type is the type of database
+	Type string
 	// Driver is the driver name of current database, so far, Polaris support : mysql/gomysql/postgres/sqlite/adodb
 	Driver string
 	// Host is the host name of current database server
@@ -48,21 +50,12 @@ func (conf *DBConfig) String() string {
 }
 
 // InitDB initialize a connection to specified database
-func InitDB(strDbType string, strHost string, strPort string, strDtbs string, strUser string, strPass string, blVerbose bool, strLog string) *gorp.DbMap {
+func (conf *DBConfig) InitDB() *gorp.DbMap {
 	// get driver
-	dialect, driver := dialectAndDriver(strDbType)
-	// get connection string
-	dbConfig := DBConfig{
-		Driver:   driver,
-		Host:     strHost,
-		Port:     strPort,
-		Database: strDtbs,
-		User:     strUser,
-		Password: strPass,
-		Verbose:  blVerbose,
-		LogFile:  strLog,
-	}
-	strDSN := dbConfig.String()
+	dialect, driver := dialectAndDriver(conf.Type)
+	conf.Driver = driver
+
+	strDSN := conf.String()
 	if strDSN == "" {
 		log.Error("Invalid DSN has been provided : " + strDSN)
 		return nil
@@ -91,5 +84,5 @@ func dialectAndDriver(strDbType string) (gorp.Dialect, string) {
 	case "adodb":
 		return gorp.AdodbDialect{"UTF8"}, "adodb"
 	}
-	panic("GORP_TEST_DIALECT env variable is not set or is invalid. Please see README.md")
+	return nil, ""
 }

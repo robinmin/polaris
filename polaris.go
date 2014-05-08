@@ -97,18 +97,9 @@ func NewApp(cfg Config, newUser func() sessionauth.User) *PolarisApplication {
 		app.Use(sessions.Sessions(config.SessionName, sessions.NewCookieStore([]byte(config.SessionMask))))
 	}
 
-	log.Debug("Connect to databse......")
+	log.Debug("Connect to databse......[" + config.Database.Database + "]")
 	if len(config.Database.Database) > 0 {
-		app.DbEngine = InitDB(
-			config.DBType,
-			config.Database.Host,
-			config.Database.Port,
-			config.Database.Database,
-			config.Database.User,
-			config.Database.Password,
-			config.Database.Verbose,
-			config.Database.LogFile,
-		)
+		app.DbEngine = config.Database.InitDB()
 		if app.DbEngine == nil {
 			log.Error("Failed to connect to database (" + config.Database.Database + ")")
 			return nil
