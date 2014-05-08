@@ -7,7 +7,6 @@ import (
 	// "database/sql"
 	// _ "github.com/mattn/go-adodb"
 	"fmt"
-	"github.com/Unknwon/goconfig"
 	"github.com/boj/redistore"
 	"github.com/go-martini/martini"
 	"github.com/martini-contrib/render"
@@ -33,37 +32,22 @@ type PolarisApplication struct {
 	*martini.Martini
 	martini.Router
 	// Config is an user provided object to store relevant information
-	Config *PolarisConfig
-	// CfgFile is a reference pointer to the config file
-	CfgFile *goconfig.ConfigFile
+	Config Config
 	// Store is a internal variable to store the RediStore object
 	Store *redistore.RediStore
 	// DbEngine is the pointer to the DB query engine
 	DbEngine *gorp.DbMap
-	// LogFile is the file name of current log
-	LogFile string
-	// LogHandle is the log handl
-	LogHandle *os.File
 }
 
 // NewApp creates a application object with some basic default middleware. It's based on ClassicMartini.
 // Classic also maps martini.Routes as a service.
-func NewApp(config *PolarisConfig) *PolarisApplication {
-	// Add file log
-	var log_file string
-	var log_handle *os.File
-	var err error
-	if len(config.DirLog) > 0 {
-		year, month, day := time.Now().Date()
-		log_file = config.DirLog + "/" + fmt.Sprintf("app_%04d%02d%02d.log", year, month, day)
-
-		log_handle, err = os.OpenFile(log_file, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-		if err != nil {
-			log.Error("error opening file: %v", err)
-			return nil
-		}
-		log.AddLogger("file", log_handle, log.ALL)
+func NewApp(cfg Config, newUser func() sessionauth.User) *PolarisApplication {
+	// Create config object
+	if !cfg.LoadConfig() {
+		log.Error("Failed to init config object")
+		return nil
 	}
+	config := cfg.GetBasicConfig()
 
 	log.Debug("Application started......")
 	// create router object
@@ -81,134 +65,62 @@ func NewApp(config *PolarisConfig) *PolarisApplication {
 	server.MapTo(rtr, (*martini.Routes)(nil))
 	server.Action(rtr.Handle)
 
-	return &PolarisApplication{server, rtr, config, nil, nil, nil, log_file, log_handle}
-}
+	app := &PolarisApplication{server, rtr, cfg, nil, nil}
 
-// NewAppWithConfig creates a application object with specified config file.
-func NewAppWithConfig(strConfig string) *PolarisApplication {
-	cfg, err := goconfig.LoadConfigFile(strConfig)
-	if err != nil {
-		log.Error("Failed to load config file：", strConfig, ":", err)
-		return nil
-	}
-	dbConfig := &DBConfig{
-		Driver:   cfg.MustValue("database", "db_type", "mssql"),
-		Host:     cfg.MustValue("database", "db_server", "localhost"),
-		Port:     cfg.MustValue("database", "db_port", "1433"),
-		Database: cfg.MustValue("database", "db_database", "temdb"),
-		User:     cfg.MustValue("database", "db_user", "sa"),
-		Password: cfg.MustValue("database", "db_password", ""),
-		Verbose:  cfg.MustBool("database", "db_verbose", true),
-		LogFile:  cfg.MustValue("database", "db_log", ""),
-	}
-	redisCOnfig := &RedisConfig{
-		Size:     cfg.MustInt("redis", "redis_maxidel", 10),
-		Network:  cfg.MustValue("redis", "redis_network", "tcp"),
-		Address:  cfg.MustValue("redis", "redis_address", "localhost:6379"),
-		Password: cfg.MustValue("redis", "redis_password", ""),
-		DB:       cfg.MustValue("redis", "redis_DB", "0"),
-	}
-
-	cfgItem := &PolarisConfig{
-		DirStatic:     cfg.MustValue("system", "dir_public", "public"),
-		DirTemplate:   cfg.MustValue("system", "dir_template", "view"),
-		DirLog:        cfg.MustValue("system", "dir_log", "."),
-		TempExtension: cfg.MustValue("system", "tpl_extension", ".tpl"),
-		TempEncoding:  cfg.MustValue("system", "tpl_encoding", "UTF-8"),
-		SessionStore:  cfg.MustValue("session", "session_store", "redis"),
-		SessionName:   cfg.MustValue("session", "session_name", "my_session"),
-		SessionMask:   cfg.MustValue("session", "session_mask", ""),
-		Redis:         redisCOnfig,
-		DBType:        dbConfig.Driver,
-		Database:      dbConfig,
-		url: map[string]string{
-			"RedirectUrl":   cfg.MustValue("system", "RedirectUrl", "/new-login"),
-			"RedirectParam": cfg.MustValue("system", "RedirectParam", "new-next"),
-		},
-		Port: cfg.MustInt("system", "port", 3000),
-	}
-	// create the app server
-	app := NewApp(cfgItem)
-	app.CfgFile = cfg
-	return app
-}
-
-func (app *PolarisApplication) RotateLog() bool {
-	// get new log
-	year, month, day := time.Now().Date()
-	new_log := app.Config.DirLog + "/" + fmt.Sprintf("app_%04d%02d%02d.log", year, month, day)
-	new_handle, err := os.OpenFile(new_log, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Error("error opening file: %v", err)
-		return false
-	}
-
-	// replace it
-	if app.LogHandle != nil {
-		app.LogHandle.Close()
-	}
-	app.LogHandle = new_handle
-	app.LogFile = new_log
-	return true
-}
-
-func (app *PolarisApplication) Init(newUser func() sessionauth.User) bool {
-	log.Debug("Initializing application......")
-
-	// add middleware -- martini-contrib/render
+	log.Debug("Add middleware -- martini-contrib/render......")
 	app.Use(render.Renderer(render.Options{
-		Directory:  app.Config.DirTemplate,
-		Extensions: []string{app.Config.TempExtension},
-		Charset:    app.Config.TempEncoding,
+		Directory:  config.DirTemplate,
+		Extensions: []string{config.TempExtension},
+		Charset:    config.TempEncoding,
 	}))
 
-	// add middleware -- martini-contrib/sessions
-	if "redis" == strings.ToLower(strings.TrimSpace(app.Config.SessionStore)) {
+	log.Debug("Add middleware -- martini-contrib/sessions......")
+	if "redis" == strings.ToLower(strings.TrimSpace(config.SessionStore)) {
 		var err error
-		log.Debug("Connect to redis......" + app.Config.Redis.Address)
+		log.Debug("Connect to redis......" + config.Redis.Address)
 		if app.Store == nil {
 			app.Store, err = redistore.NewRediStoreWithDB(
-				app.Config.Redis.Size,
-				app.Config.Redis.Network,
-				app.Config.Redis.Address,
-				app.Config.Redis.Password,
-				app.Config.Redis.DB,
-				[]byte(app.Config.SessionMask),
+				config.Redis.Size,
+				config.Redis.Network,
+				config.Redis.Address,
+				config.Redis.Password,
+				config.Redis.DB,
+				[]byte(config.SessionMask),
 			)
 			if err != nil {
 				log.Error("Failed to connect to redis : " + err.Error())
-				return false
+				return nil
 			}
 		}
-		app.Use(sessions.Sessions(app.Config.SessionName, app.Store))
+		app.Use(sessions.Sessions(config.SessionName, app.Store))
 	} else {
-		app.Use(sessions.Sessions(app.Config.SessionName, sessions.NewCookieStore([]byte(app.Config.SessionMask))))
+		app.Use(sessions.Sessions(config.SessionName, sessions.NewCookieStore([]byte(config.SessionMask))))
 	}
 
-	// Connect to databse
-	if len(app.Config.Database.Database) > 0 {
+	log.Debug("Connect to databse......")
+	if len(config.Database.Database) > 0 {
 		app.DbEngine = InitDB(
-			app.Config.DBType,
-			app.Config.Database.Host,
-			app.Config.Database.Port,
-			app.Config.Database.Database,
-			app.Config.Database.User,
-			app.Config.Database.Password,
-			app.Config.Database.Verbose,
-			app.Config.Database.LogFile,
+			config.DBType,
+			config.Database.Host,
+			config.Database.Port,
+			config.Database.Database,
+			config.Database.User,
+			config.Database.Password,
+			config.Database.Verbose,
+			config.Database.LogFile,
 		)
 		if app.DbEngine == nil {
-			log.Error("Failed to connect to database (" + app.Config.Database.Database + ")")
-			return false
+			log.Error("Failed to connect to database (" + config.Database.Database + ")")
+			return nil
 		}
 
 		// open SQL log or not
-		if app.Config.Database.Verbose {
-			if len(app.Config.Database.LogFile) > 0 {
-				sql_log, err := os.OpenFile(app.Config.Database.LogFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+		if config.Database.Verbose {
+			if len(config.Database.LogFile) > 0 {
+				sql_log, err := os.OpenFile(config.Database.LogFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 				if err != nil {
 					log.Error("error opening file: %v", err)
-					return false
+					return nil
 				}
 				app.DbEngine.TraceOn("[SQL]", stdlog.New(sql_log, "sql", stdlog.Lmicroseconds))
 			} else {
@@ -219,32 +131,61 @@ func (app *PolarisApplication) Init(newUser func() sessionauth.User) bool {
 		}
 	}
 
+	log.Debug("Add middleware -- martini-contrib/sessionauth......")
 	app.Use(sessionauth.SessionUser(newUser))
-	sessionauth.RedirectUrl = app.Config.url["RedirectUrl"]
-	sessionauth.RedirectParam = app.Config.url["RedirectParam"]
+	sessionauth.RedirectUrl = config.url["RedirectUrl"]
+	sessionauth.RedirectParam = config.url["RedirectParam"]
 
-	// call user defined touter map
-	return app.Config.RoterMap(app)
+	log.Debug("Add User defined router mapping......")
+	if !cfg.RoterMap(app) {
+		log.Error("Failed to add Roter Mapping")
+		return nil
+	}
+	return app
 }
 
-func (app *PolarisApplication) UnInit() bool {
+func (app *PolarisApplication) Close() bool {
 	log.Debug("Uninitializing application......")
+	config := app.Config.GetBasicConfig()
 	// close the redis session handle
 	if app.Store != nil {
 		app.Store.Close()
 		app.Store = nil
 	}
 	// close the handle of log file
-	if app.LogHandle != nil {
-		app.LogHandle.Close()
-		app.LogHandle = nil
+	if config.LogHandle != nil {
+		config.LogHandle.Close()
+		config.LogHandle = nil
 	}
 	return true
 }
 
+func (app *PolarisApplication) RotateLog() bool {
+	config := app.Config.GetBasicConfig()
+
+	// get new log
+	year, month, day := time.Now().Date()
+	new_log := config.DirLog + "/" + fmt.Sprintf("app_%04d%02d%02d.log", year, month, day)
+	new_handle, err := os.OpenFile(new_log, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		log.Error("error opening file: %v", err)
+		return false
+	}
+
+	// replace it
+	if config.LogHandle != nil {
+		config.LogHandle.Close()
+	}
+	config.LogHandle = new_handle
+	config.LogFile = new_log
+	return true
+}
+
 func (app *PolarisApplication) RunApp() bool {
+	config := app.Config.GetBasicConfig()
+
 	host := os.Getenv("HOST")
-	port := app.Config.Port
+	port := config.Port
 	log.Info("listening on " + host + ":" + strconv.Itoa(port))
 	lgr := log.GetLogger("stdout")
 	if lgr != nil {
