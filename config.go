@@ -33,7 +33,7 @@ type PolarisConfig struct {
 	// DBType is the datbase type. So far, it can be mysql/gomysql/postgres/sqlite/adodb
 	DBType string
 	// Database is the configuration items for database
-	Database *DBConfig
+	Database DBConfig
 	// URL is a URL collection
 	url map[string]string
 	// Port is the port number current server listening on
@@ -100,7 +100,7 @@ func (cfg *PolarisConfig) LoadConfig() bool {
 		DB:       cfgFile.MustValue("redis", "redis_DB", "0"),
 	}
 
-	cfg.Database = &DBConfig{
+	cfg.Database = DBConfig{
 		Type:     cfgFile.MustValue("database", "db_type", "mssql"),
 		Driver:   "",
 		Host:     cfgFile.MustValue("database", "db_server", "localhost"),

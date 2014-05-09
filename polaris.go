@@ -12,9 +12,9 @@ import (
 	"github.com/martini-contrib/render"
 	"github.com/martini-contrib/sessionauth"
 	"github.com/martini-contrib/sessions"
-	"github.com/robinmin/gorp"
+	// "github.com/robinmin/gorp"
 	log "github.com/robinmin/logo"
-	stdlog "log"
+	// stdlog "log"
 	"net/http"
 	"os"
 	"strconv"
@@ -35,8 +35,8 @@ type PolarisApplication struct {
 	Config Config
 	// Store is a internal variable to store the RediStore object
 	Store *redistore.RediStore
-	// DbEngine is the pointer to the DB query engine
-	DbEngine *gorp.DbMap
+	// DbEngine is the pointer to a global query engine
+	DbEngine *DBEngine
 }
 
 // NewApp creates a application object with some basic default middleware. It's based on ClassicMartini.
@@ -97,29 +97,16 @@ func NewApp(cfg Config, newUser func() sessionauth.User) *PolarisApplication {
 		app.Use(sessions.Sessions(config.SessionName, sessions.NewCookieStore([]byte(config.SessionMask))))
 	}
 
-	log.Debug("Connect to databse......[" + config.Database.Database + "]")
 	if len(config.Database.Database) > 0 {
+		log.Debug("Connect to databse......[" + config.Database.Database + "]")
+		// ensure the connection can be made corrrectly, connect to the dabase when starting
 		app.DbEngine = config.Database.InitDB()
 		if app.DbEngine == nil {
 			log.Error("Failed to connect to database (" + config.Database.Database + ")")
 			return nil
 		}
-
-		// open SQL log or not
-		if config.Database.Verbose {
-			if len(config.Database.LogFile) > 0 {
-				sql_log, err := os.OpenFile(config.Database.LogFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-				if err != nil {
-					log.Error("error opening file: %v", err)
-					return nil
-				}
-				app.DbEngine.TraceOn("[SQL]", stdlog.New(sql_log, "sql", stdlog.Lmicroseconds))
-			} else {
-				app.DbEngine.TraceOn("[SQL]", log.GetLogger("file"))
-			}
-		} else {
-			app.DbEngine.TraceOff()
-		}
+		log.Debug("Add middleware -- gorp......")
+		app.Use(config.Database.MartiniHandler())
 	}
 
 	log.Debug("Add middleware -- martini-contrib/sessionauth......")
@@ -147,6 +134,9 @@ func (app *PolarisApplication) Close() bool {
 	if config.LogHandle != nil {
 		config.LogHandle.Close()
 		config.LogHandle = nil
+	}
+	if app.DbEngine != nil {
+		app.DbEngine.Close()
 	}
 	return true
 }
